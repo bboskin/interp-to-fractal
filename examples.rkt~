@@ -1,6 +1,6 @@
 #lang racket
 
-(require "animate.rkt")
+(require "animate-code.rkt" "expander.rkt")
 
 (provide (all-defined-out))
 

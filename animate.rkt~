@@ -34,7 +34,7 @@
      (values (if (>= (depth e1) (depth e2)) e1 e2)
              (car (op->argtys o)))]
     [`(,(? arb-op? o) . ,es)
-     (let-values (((e) (find-largest-depth/expr es)))
+     (let-values (((e i) (find-largest-depth es)))
        (values e (car (op->argtys o))))]
     [`(if #t ,t ,c ,a) (values c ty)]
     [`(if #f ,t ,c ,a) (values a ty )]
@@ -220,19 +220,6 @@
               (if (> d dmax)
                   (loop d i (add1 i) (cdr es))
                   (loop dmax j (add1 i) (cdr es))))))))
-
-(define (find-largest-depth/expr es)
-  (let loop ((dmax 0)
-             (e (car es))
-             (i 0)
-             
-             (es es))
-    (cond
-      ((null? es) e)
-      (else (let ((d (depth (car es))))
-              (if (> d dmax)
-                  (loop d (car es) (add1 i) (cdr es))
-                  (loop dmax e (add1 i) (cdr es))))))))
 
 (define (calculate-used/y k ls)
   (let ((ls (split k ls)))
