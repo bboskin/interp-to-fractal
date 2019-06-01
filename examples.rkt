@@ -18,6 +18,9 @@
      (((λ (f) (λ (k n m) ((f f) k n m))) G)
       ,k ,n ,m)))
 
+#;
+(main (G 1 2 4))
+
 (define (ack n m)
   `(let ((ack
           (λ (ack)
@@ -28,6 +31,11 @@
                       ((ack ack) (sub1 n) 1)
                       ((ack ack) (sub1 n) ((ack ack) n (sub1 m)))))))))
      (((λ (f) (λ (n m) ((f f) n m))) ack) ,n ,m)))
+
+
+
+#;
+(main (ack 2 1))
 
 (define (even? n)
   `(let ((meven?
@@ -40,8 +48,16 @@
                           ((meven? meven? modd?) (sub1 n)))))))
      (((λ (f g) (λ (n) ((f f g) n))) meven? modd?) ,n)))
 
+#;
+(main (even? 4))
 
 ;; sorting
+(define l1
+  '(cons 1 (cons 4 (cons 2 (cons 10 empty)))))
+
+(define l2
+  '(cons 4 (cons 2 (cons 10 empty))))
+
 (define (msort l)
   `(let ((split
           (λ (split)
@@ -66,6 +82,13 @@
                             (r2 ((msort msort) (cdr s))))
                         (((λ (f) (λ (g1 g2) ((f f) g1 g2))) merge) r1 r2))))))))
        (((λ (f) (λ (g) ((f f) g))) msort) ,l))))
+
+;; this one is super cool but laggy at the start, because the expression is so massive. the 2nd one is better
+#;
+(main (msort l1))
+
+#;
+(main (msort l2))
 
 (define (qsort l)
   `(let ((partition
@@ -94,6 +117,9 @@
        (((λ (f) (λ (g) ((f f) g))) qsort)
         ,l))))
 
+#;
+(main (qsort l2))
+
 (define (isort l)
   `(let ((insert
           (λ (insert)
@@ -113,7 +139,8 @@
                      ((isort isort) (cdr ls))))))))
        (((λ (f) (λ (g) ((f f) g))) isort) ,l))))
 
-
+#;
+(main (isort l2))
 ;;;;; Random things
 
 (define (foo1 n m)
@@ -129,3 +156,6 @@
                      ((foo foo goo) (sub1 k) (add1 l) (* n m) (* m o) (* o p) 1))))))
      (((λ (f g) (λ (a b c d e h) ((f f g) a b c d e h))) foo goo)
       ,n ,m 1 1 1 1)))
+
+#;
+(main (foo1 3 4))

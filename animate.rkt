@@ -432,7 +432,9 @@
 (define (draw-world W)
   (match W
     [(World e i x y size ty)
-     (if e (place-image CIRCLE x y i) (text "done!" 100 "black"))]))
+     (if e
+         i #;(place-image CIRCLE x y i)
+         (text "done!" 100 "black"))]))
 
 (require 2htdp/universe)
 
@@ -445,7 +447,8 @@
     (let-values (((i cent size) (draw-code IMAGE-SIZE e 'any #t))
                  ((e ty) (subimg e 'any)))
       (big-bang (World e (give-background i) (car cent) (cdr cent) size ty)
-        [on-key (λ (e i) (match i
+        [on-tick tick-handler]
+        #;[on-key (λ (e i) (match i
                            ["p" (begin (print-depth e)
                                        (tick-handler e))]
                            [else (tick-handler e)]))]
