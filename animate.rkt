@@ -13,6 +13,26 @@
 
 (define (depth e)
   (match e
+    [(? boolean? b) 1]
+    [(? number? k) 1]
+    ['empty 1]
+    [(? symbol? y) 1]
+    ['(blank) 1]
+    [`(,(? unary-op? o) ,d ,e) d]
+    [`(,(? binary-op? o) ,d ,e1 ,e2) d]
+    [`(,(? arb-op? o) ,d . ,es) d]
+    [`(if ,d ,v ,t ,c ,a) d]
+    [`(λ ,xs ,b) 1]
+    [`(app ,d ,res-exp . ,args) d]
+    ;; forms for code which won't be zoomed into (may occur in unused if branches and unapplied lambdas)
+    [`(,(? unary-op? o) ,e) 1]
+    [`(,(? binary-op? o) ,e1 ,e2) 2]
+    [`(,(? arb-op? o) . ,es) (length es)]
+    [`(if ,t ,c ,a) (+ (depth t) (depth c) (depth a))]
+    [`(let ,ds ,b) (depth b)]
+    [`(,f . ,vs) (add1 (length vs))])
+  #;
+  (match e
     [`(,(? unary-op?) ,x) (depth x)]
     [`(,(? binary-op?) ,a ,d) (+ (depth a) (depth d))]
     [`(if ,v . ,es) (foldr (λ (x a) (+ (depth x) a)) 0 es)]
@@ -27,6 +47,40 @@
     [(? boolean? b) (values #f 'boolean)]
     [(? number? k) (values #f 'number)]
     ['empty (values #f 'list)]
+    [(? symbol? y) (values #f ty)]
+    ['(blank) (values #f ty)]
+    [`(with-depth ,(? unary-op? o) ,d ,e) (values e (car (op->argtys o)))]
+    [`(with-depth ,(? binary-op? o) ,d ,e1 ,e2)
+     (values (if (>= (depth e1) (depth e2)) e1 e2)
+             (car (op->argtys o)))]
+    [`(with-depth ,(? arb-op? o) ,d . ,es)
+     (let-values (((e) (find-largest-depth/expr es)))
+       (values e (car (op->argtys o))))]
+    [`(with-depth if ,d #t ,t ,c ,a) (values c ty)]
+    [`(with-depth if ,d #f ,t ,c ,a) (values a ty)]
+    [`(with-depth if ,d ,v ,t ,c ,a) (values (if (>= (depth c) (depth a)) c a) ty)]
+    [`(λ ,xs ,b) (values b 'any)]
+    [`(with-depth app ,d ,res-exp . ,args) (values res-exp ty)]
+    ;; forms for code which won't be zoomed into (may occur in unused if branches and unapplied lambdas)
+    [`(,(? unary-op? o) ,e) (values e (car (op->argtys o)))]
+    [`(,(? binary-op? o) ,e1 ,e2)
+     (values (if (>= (depth e1) (depth e2)) e1 e2)
+             (car (op->argtys o)))]
+    [`(,(? arb-op? o) . ,es)
+     (let-values (((e) (find-largest-depth/expr es)))
+       (values e (car (op->argtys o))))]
+    [`(if #t ,t ,c ,a) (values c ty)]
+    [`(if #f ,t ,c ,a) (values a ty)]
+    [`(if ,v ,t ,c ,a) (values (if (>= (depth c) (depth a)) c a) ty)]
+    [`(if ,t ,c ,a) (values (if (>= (depth c) (depth a)) c a) ty)]
+    [`(λ ,xs ,b) (values b 'any)]
+    [`(let ,ds ,b) (values b ty)]
+    [`(app ,res-exp . ,args) (values res-exp ty)]
+    [`(,f . ,vs) (values f 'function)])
+  #;(match C
+    [(? boolean? b) (values #f 'boolean)]
+    [(? number? k) (values #f 'number)]
+    ['empty (values #f 'list)]
     ['(blank) (values #f ty)]
     [(? symbol? y) (values #f ty)]
     [`(,(? unary-op? o) ,e) (values e (car (op->argtys o)))]
@@ -37,7 +91,7 @@
      (let-values (((e) (find-largest-depth/expr es)))
        (values e (car (op->argtys o))))]
     [`(if #t ,t ,c ,a) (values c ty)]
-    [`(if #f ,t ,c ,a) (values a ty )]
+    [`(if #f ,t ,c ,a) (values a ty)]
     [`(if ,v ,t ,c ,a) (values (if (>= (depth c) (depth a)) c a) ty)]
     [`(if ,t ,c ,a) (values (if (>= (depth c) (depth a)) c a) ty)]
     [`(λ ,xs ,b) (values b 'any)]
@@ -225,7 +279,6 @@
   (let loop ((dmax 0)
              (e (car es))
              (i 0)
-             
              (es es))
     (cond
       ((null? es) e)
@@ -261,7 +314,6 @@
          (es (append es (build-list (- kmax k) (λ (_) '(blank)))))
          (tys (append tys (build-list (- kmax k) (λ (_) 'any))))
          (es/ds (map (λ (e) (let ((d (depth e))) (cons d e))) es))
-         ;(es/ds (sort es/ds (λ (x y) (> (car x) (car y)))))
          (ds (share-depths row-size es/ds))
          (init-size (sqrt (/ (sqr size) kmax)))
          (avg-depth (/ (foldr + 0 ds) kmax))
@@ -322,20 +374,20 @@
   (draw-subimgs ((op->wrapper-fn 'λ) k-args) (poly-subimg-max k-args) size `(,e) '(any) 'function 0))
 
 (define (draw-app f vs k-args size ty)
-  (let ((i 0))
-        (draw-subimgs ((op->wrapper-fn 'app) k-args)
-                      (poly-subimg-max k-args)
-                      size (cons f vs)
-                      (cons 'function (build-list k-args (λ (_) 'any)))
-                      ty i)))
+  (draw-subimgs
+   ((op->wrapper-fn 'app) k-args)
+   (poly-subimg-max k-args)
+   size (cons f vs)
+   (cons 'function (build-list k-args (λ (_) 'any)))
+   ty 0))
 
 (define (draw-let ds b size ty)
-  (let ((i 0))
-    (draw-subimgs (op->wrapper-fn 'let)
-                  subimg-max
-                  size (cons `(in ,b) (map cadr ds))
-                  (cons ty (build-list (length ds) (λ (_) 'any)))
-                  ty i)))
+  (draw-subimgs
+   (op->wrapper-fn 'let)
+   subimg-max
+   size (cons `(in ,b) (map cadr ds))
+   (cons ty (build-list (length ds) (λ (_) 'any)))
+   ty 0))
 
 ;; Putting it all together
 
@@ -346,14 +398,18 @@
     ['empty (draw-null size)]
     [(? symbol? y) (draw-symbol size y (type->color ty))]
     ['(blank) (draw-blank size)]
+    [`(with-depth ,(? unary-op? o) ,d ,e) (draw-unary o e size ty)]
+    [`(with-depth ,(? binary-op? o) ,d ,e1 ,e2) (draw-binary o e1 e2 size d?)]
+    [`(with-depth ,(? arb-op? o) ,d . ,es) (draw-arb-arity o es size d?)]
+    [`(with-depth if ,d ,v ,t ,c ,a) (draw-if v t c a size ty)]
+    [`(λ ,xs ,b) (draw-lambda (length xs) b size)]
+    [`(with-depth app ,d ,res-exp . ,args) (draw-app res-exp args (length args) size ty)]
+    ;; forms for code which won't be zoomed into (may occur in unused if branches and unapplied lambdas)
     [`(,(? unary-op? o) ,e) (draw-unary o e size ty)]
     [`(,(? binary-op? o) ,e1 ,e2) (draw-binary o e1 e2 size d?)]
     [`(,(? arb-op? o) . ,es) (draw-arb-arity o es size d?)]
-    [`(if ,v ,t ,c ,a) (draw-if v t c a size ty)]
-    [`(if ,t ,c ,a) (draw-if 'unsure t c a size ty)]
-    [`(λ ,xs ,b) (draw-lambda (length xs) b size)]
+    [`(if ,d ,t ,c ,a) (draw-if 'unsure t c a size ty)]
     [`(let ,ds ,b) (draw-let ds b size ty)]
-    [`(app ,res-exp . ,args) (draw-app res-exp args (length args) size ty)]
     [`(,f . ,vs) (draw-app f vs (length vs) size ty)]))
 
 (define (draw-code size C ty b)
@@ -418,7 +474,6 @@
          (if e
              (let*-values (((i center size) (draw-code IMAGE-SIZE e ty #t))
                            ((e ty) (subimg e ty))
-                           ;((e) (run e))
                            ((i) (give-background i)))
                (World e i (car center) (cdr center) size ty))
              (World #f i CENTER CENTER IMAGE-SIZE ty))
@@ -433,7 +488,8 @@
   (match W
     [(World e i x y size ty)
      (if e
-         i #;(place-image CIRCLE x y i)
+         #;i
+         (place-image CIRCLE x y i)
          (text "done!" 100 "black"))]))
 
 (require 2htdp/universe)

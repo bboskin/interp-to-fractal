@@ -34,71 +34,37 @@
 (define (unary n) (if (<= n 0) n `(add1 ,(unary (sub1 n)))))
 (define always-true (λ (x) #t))
 (define always-false (λ (x) #f))
-(define (coerce-bool f) (λ (x) (if (f x) (True) (False))))
+(define ((coerce-bool f) x) (if (f x) (True) (False)))
 (define (Boolean? x)
   (or (True? x) (False? x)))
-
-
+(define (sum lon) (foldr + 0 lon))
+(define Return list)
 
 ;; Environments
 (define (empty-env) '())
 (define (apply-env env y)
   (let ((pr (assv y env)))
-    (if pr (cdr pr) (cons y y))))
-(define (extend-env x e a env)
-  (cons (cons x (cons e a)) env))
-(define (extend-env* xs es as env)
+    (if pr (cdr pr) (Return `(var 1 ,y) y 1))))
+(define (extend-env x e a d env)
+  (cons (cons x (Return e a d)) env))
+(define (extend-env* xs es as ds env)
   (cond
     ((and (null? xs) (null? as)) env)
     ((or (null? xs) (null? as)) (error 'extend-env* "mismatched arities"))
-    (else (extend-env* (cdr xs) (cdr es) (cdr as) (extend-env (car xs) (car es) (car as) env)))))
+    (else (extend-env* (cdr xs) (cdr es) (cdr as) (cdr ds) (extend-env (car xs) (car es) (car as) (car ds) env)))))
 
 
 ;; Closures
 (struct Closure (xs env b))
 (define make-closure Closure)
 
-(define (apply-closure c es vs)
+(define (apply-closure c d es ds vs)
   (match c
     [(Closure xs env b)
-     ((expand (extend-env* xs es vs env)) b)]
-    [else (cons (cons c es) (cons c es))]))
+     ((expand (extend-env* xs es vs ds env)) b)]
+    [else (Return (cons c es) (cons c es) (sum (cons d ds)))]))
 
 ;; Evaluation/expansion
-
-;; expects op to be commutative
-(define (crunch pred? sym op base ls)
-  (let loop ((ans base)
-             (ls ls)
-             (kept '()))
-    (cond
-      [(null? ls) (if (null? kept) ans (sym (cons ans (reverse kept))) #;`(,sym ,ans . ,(reverse kept)))]
-      [(pred? (car ls)) (loop (op (car ls) ans) (cdr ls) kept)]
-      [else (loop ans (cdr ls) (cons (car ls) kept))])))
-
-;; helpers for certain ops
-
-(define (if-c env t c a)
-  (let ((res ((expand env) c)))
-    (cons `(if #t ,t ,(car res) ,a) (cdr res))))
-
-(define (if-a env t c a)
-  (let ((res ((expand env) a)))
-    (cons `(if #f ,t ,c ,(car res)) (cdr res))))
-
-(define (do-if env t c a)
-  (let* ((res-t ((expand env) t))
-         (t-e (car res-t))
-         (t-a (cdr res-t)))
-    (if (Boolean? t-a)
-        (if (True? t-a)
-            (if-c env t-e c a)
-            (if-a env t-e c a))
-        (cons `(if unsure ,t-e ,c ,a) (If t-a c a)))))
-
-(define (do-closure xs b env)
-  (cons `(λ ,xs ,(car ((expand env) b)))
-        (make-closure xs env b)))
 
 (define (do-and x y)
   (if (or (False? x) (False? y)) (False) (True)))
@@ -106,35 +72,79 @@
 (define (do-or x y)
   (if (and (False? x) (False? y)) (False) (True)))
 
+;; expects op to be commutative
+(define (crunch pred? sym op base ls)
+  (let loop ((ans base)
+             (ls ls)
+             (kept '()))
+    (cond
+      [(null? ls) (if (null? kept) ans (sym (cons ans (reverse kept))))]
+      [(pred? (car ls)) (loop (op (car ls) ans) (cdr ls) kept)]
+      [else (loop ans (cdr ls) (cons (car ls) kept))])))
+
+;; helpers for certain ops
+
+(define (if-c env t t-d c a)
+  (let* ((res ((expand env) c))
+         (depth (+ t-d 1 (caddr res))))
+    (Return `(with-depth if ,depth #t ,t ,(car res) ,a) (cadr res) depth)))
+
+(define (if-a env t t-d c a)
+  (let* ((res ((expand env) a))
+         (depth (+ t-d 1 (caddr res))))
+    (Return `(with-depth if ,depth #f ,t ,c ,(car res)) (cadr res) depth)))
+
+(define (do-if env t c a)
+  (let* ((res-t ((expand env) t))
+         (t-e (car res-t))
+         (t-a (cadr res-t))
+         (t-d (caddr res-t)))
+    (if (Boolean? t-a)
+        (if (True? t-a)
+            (if-c env t-e t-d c a)
+            (if-a env t-e t-d c a))
+        (let ((depth (* 3 t-d)))
+          (Return `(with-depth if ,depth unsure ,t-e ,c ,a) (If t-a c a) depth)))))
+
+(define (do-closure xs b env)
+  (Return `(λ ,xs ,b) (make-closure xs env b) 1))
+
 (define (do-cons env a d)
-  (let ((res1 ((expand env) a))
-        (res2 ((expand env) d)))
-    (cons `(cons ,(car res1) ,(car res2))
-          (Cons (cdr res1) (cdr res2)))))
+  (let* ((res1 ((expand env) a))
+         (res2 ((expand env) d))
+         (depth (+ (caddr res1) (caddr res2))))
+    (Return `(with-depth cons ,depth ,(car res1) ,(car res2))
+            (Cons (cadr res1) (cadr res2))
+            depth)))
 
 (define (do-comp n m comp comp-constr env)
-  (let ((res-n ((expand env) n))
-        (res-m ((expand env) m)))
-    (cons `(< ,(car res-n) ,(car res-m))
-          (goo
-              (((number? number?) (λ (a b) (if (comp a b) (True) (False))))
-               ((always-true always-true) (λ (e1 e2) (comp-constr e1 e2))))
-              ((cdr res-n) (cdr res-m))))))
+  (let* ((res-n ((expand env) n))
+         (res-m ((expand env) m))
+         (depth (+ (caddr res-n) (caddr res-m))))
+    (Return `(with-depth comp ,depth ,(car res-n) ,(car res-m))
+            (goo
+             (((number? number?) (λ (a b) (if (comp a b) (True) (False))))
+              ((always-true always-true) (λ (e1 e2) (comp-constr e1 e2))))
+             ((cadr res-n) (cadr res-m)))
+            depth)))
 
 (define-syntax do-unary
   (syntax-rules ()
     ((_ env sym name go ...)
-     (let ((res ((expand env) name)))
-       (cons `(sym ,(car res))
-             (goo (go ...)
-                  (cdr res)))))))
+     (let* ((res ((expand env) name))
+            (depth (caddr res)))
+       (Return `(with-depth sym ,depth ,(car res))
+               (goo (go ...) (cadr res))
+               depth)))))
 
 (define-syntax do-arb-arity
   (syntax-rules ()
     ((_ env pred? sym ms Con op b)
-     (let ((es/vs (map (expand env) ms)))
-       (cons `(sym . ,(map car es/vs))
-             (crunch pred? Con op b (map cdr es/vs)))))))
+     (let* ((es/vs (map (expand env) ms))
+            (depth (sum (map caddr es/vs))))
+       (Return `(with-depth sym ,depth . ,(map car es/vs))
+               (crunch pred? Con op b (map cadr es/vs))
+               depth)))))
 
 (define-syntax goo
   (syntax-rules ()
@@ -148,11 +158,38 @@
          (res1 v)
          (goo (e ...) v)))))
 
+(define (do-app env xs f)
+  (let* ((xs (map (expand env) xs))
+         (xs-es (map car xs))
+         (xs-as (map cadr xs))
+         (xs-ds (map caddr xs))
+         (f ((expand env) f))
+         (f-e (car f))
+         (f-a (cadr f))
+         (f-d (caddr f))
+         (r (apply-closure f-a f-d xs-es xs-ds xs-as))
+         (res-e (car r))
+         (res-a (cadr r))
+         (res-d (caddr r))
+         (depth (sum (cons res-d xs-ds))))
+    (Return `(with-depth app ,depth ,res-e . ,xs-es) res-a depth)))
+
+(define (do-let env es b)
+  (let* ((res* (map (expand env) (map cadr es)))
+         (xs (map car es))
+         (es (map car res*))
+         (as (map cadr res*))
+         (ds (map caddr res*))
+         (res ((expand (extend-env* xs es as ds env)) b)))
+    res))
+
+(define (do-const e v) (Return e v 1))
+
 (define ((expand env) exp)
   (match exp
-    ['empty (cons 'empty (Empty))]
-    [(? boolean? b) (cons b (if b (True) (False)))]
-    [(? number? n) (cons (unary n) n)]
+    ['empty (do-const 'empty (Empty))]
+    [(? boolean? b) (do-const b (if b (True) (False)))]
+    [(? number? n) (do-const (unary n) n)]
     [(? symbol? y) (apply-env env y)]
     [`(λ (,xs ...) ,b) (do-closure xs b env)]
     [`(< ,n ,m) (do-comp n m < Less-Than env)]
@@ -172,18 +209,8 @@
     [`(or ,ms ...) (do-arb-arity env always-true or ms Or do-or (False))]
     [`(cons ,a ,d) (do-cons env a d)]
     [`(if ,t ,c ,a) (do-if env t c a)]
-    [`(let ,es ,b)
-     (let ((res* (map (expand env) (map cadr es))))
-       ((expand (extend-env* (map car es) (map car res*) (map cdr res*) env)) b))]
-    [`(,f ,xs ...)
-     (let* ((xs (map (expand env) xs))
-            (xs-es (map car xs))
-            (xs-as (map cdr xs))
-            (f ((expand env) f))
-            (r (apply-closure (cdr f) xs-es xs-as))
-            (e^ (car r))
-            (a^ (cdr r)))
-       (cons `(app ,e^ . ,xs-es) a^))]))
+    [`(let ,es ,b) (do-let env es b)]
+    [`(,f ,xs ...) (do-app env xs f)]))
 
 (define (make-defs env defs)
   (match defs
@@ -196,13 +223,14 @@
 (define (run defs c)
   (let* ((env (make-defs (empty-env) defs))
          (x ((expand env) c)))
-    (print (cdr x))
+    (displayln (cadr x))
     (car x)))
 
 (define (run-val defs c)
   (let* ((env (make-defs (empty-env) defs))
          (x ((expand env) c)))
-    (cdr x)))
+    (displayln (caddr x))
+    (cadr x)))
 
 ;; factorial
 
@@ -234,10 +262,6 @@
   '((define fact
       ((λ (f) (λ (g) ((f f) g)))
        (λ (fact) (λ (k) (if (zero? k) 1 (* k ((fact fact) (sub1 k))))))))))
-
-#;
-(check-equal? (run p1 '(fact 5))
-              (run '() (fact-of1 5)))
 
 (check-equal? (run-val '() (fact-of1 5)) 120)
 (check-equal? (run-val '() (fact-of2 5)) 120)
@@ -395,5 +419,3 @@
       (if (zero? m)
           (ack (sub1 n) 1)
           (ack (sub1 n) (ack n (sub1 m))))))
-
-
